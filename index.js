@@ -4,8 +4,12 @@ const ejs = require('ejs');
 const http = require('http');
 const path = require('path');
 const socketIO = require('socket.io');
-const { addMessage } = require('./utils/addMessage');
-const { saveMessage } = require('./utils/saveMessage');
+const mongoose = require('mongoose')
+const dotenv = require("dotenv")
+// const { addMessage } = require('./utils/addMessage');
+// const { saveMessage } = require('./utils/saveMessage');
+// const { connectDB } = require('./utils/connectDB');
+// const { getMessages } = require('./utils/getMessages');
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server);
@@ -19,15 +23,70 @@ app.use('/', (req, res)=>{
     res.render('index.html');
 });
 
-let messages = [];
+/*Conexão com o MongoDB: */
+function connectDB() {
 
+    /* URL de conexão com o Atlas mongoDB: */
+    dotenv.config()
+
+    mongoose.connect(process.env.MONGO_URL);
+    mongoose.connection.on('error', console.error.bind(console, 'connection error:'));
+    mongoose.connection.once('open', function callback(){
+        console.log("Atlas mongoDB conectado!");
+    });
+
+}
+
+
+/* Chama a função de conexão com o banco de dados */
+connectDB();
+
+
+/* Define o model */
+let Message = mongoose.model('Message',{ usuario : String, data_hora : String, message : String});
+
+let messages = []
+
+/*Recupera as mensagens do banco de dados: */
+Message.find({})
+    .then(docs=>{
+        console.log('DOCS: ' + docs);
+        messages = docs;
+        console.log('MESSAGES: ' + messages);
+    }).catch(err=>{
+        console.log(err);
+    });
+
+/* Cria uma conexão com o socketIO que será usada pela aplicação de chat: */
 io.on('connection', socket=>{
-    console.log('Novo usuário conectado! ID: ' + socket.id)
 
-    addMessage(socket, messages)
+    /* Exibe a título de teste da conexão o id do socket do usuário conectado: */
+    console.log(`Novo usuário conectado ${socket.id}`);
 
-    saveMessage(socket, messages)
-});
+    /* Recupera e mantem as mensagens do front para back e vice-versa: */
+    socket.emit('previousMessage', messages);
+
+    /* Dispara ações quando recebe mensagens do frontend: */
+    socket.on('sendMessage', data => {
+
+    /* Adicona uma mensagem enviada no final do array de mensagens: */
+    // messages.push(data);
+    let message = new Message(data);
+    message.save()
+        .then(
+            socket.broadcast.emit('receivedMessage', data)
+        )
+        .catch(err=>{
+            console.log('ERRO: ' + err);
+        });
+
+    /* Propaga a mensagem enviada para todos os usuário conectados na aplicaçao de chat: */
+    // socket.broadcast.emit('receivedMessage', data);
+
+    });
+
+})
+
 
 server.listen(3000, ()=>{
     console.log('Servidor do web chat rodando em -> http://localhost:3000');
